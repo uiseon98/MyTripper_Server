@@ -20,6 +20,8 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 // JWT secret key (⚠️ 실제 서비스에서는 더욱 안전한 secret key를 사용하세요!)
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key'; // 환경 변수에서 secret key를 가져오거나 기본값 설정
 
+const fetch = require('node-fetch'); // ✅ node-fetch 모듈 추가 (서버 측 fetch)
+
 // 미들웨어 설정
 app.use(express.json()); // JSON 데이터를 처리할 수 있도록 설정
 app.use(
@@ -47,6 +49,28 @@ app.get('/api/keys', (req, res) => {
   });
 });
 //-----------------------------------------------------------
+
+// 🟢 프록시 API 엔드포인트: 이미지 URL을 받아 프록시 이미지 제공
+app.get('/api/proxy-image', async (req, res) => {
+  const imageUrl = req.query.imageUrl; // 클라이언트에서 이미지 URL 파라미터로 받기
+  if (!imageUrl) {
+    return res.status(400).json({ message: 'imageUrl 파라미터가 필요합니다.' });
+  }
+
+  try {
+    const imageResponse = await fetch(imageUrl); // 서버에서 이미지 URL로 직접 요청 (CORS 우회)
+    if (!imageResponse.ok) {
+      console.error('프록시 이미지 다운로드 실패:', imageResponse.status, imageResponse.statusText, imageUrl); // 오류 로깅
+      return res.status(imageResponse.status).json({ message: '프록시 이미지 다운로드 실패' }); // 오류 응답
+    }
+    // 이미지 데이터를 스트림으로 클라이언트에게 직접 전달 (Content-Type 자동 설정)
+    imageResponse.body.pipe(res); // pipe() 를 사용하여 스트리밍 방식으로 응답 (✅ 중요)
+  } catch (error) {
+    console.error('프록시 이미지 요청 오류:', error); // 오류 로깅
+    res.status(500).json({ message: '프록시 이미지 요청 오류' });
+  }
+});
+//---------------------------------------------
 
 // 🟢 회원가입 API 엔드포인트
 app.post('/signup', async (req, res) => {
@@ -210,7 +234,7 @@ app.put('/myinfo/modifiy', async (req, res) => {
 });
 
 // 마이페이지 내 글 조회
-app.get("/mypost", async (req, res) => {
+app.get('/mypost', async (req, res) => {
   try {
     const user_id = req.query.id;
     const pagelimit = 5;
@@ -222,10 +246,10 @@ app.get("/mypost", async (req, res) => {
 
     // 데이터 쿼리 (페이징 처리)
     const { data, error: dataError } = await supabase
-      .from("travelplan")
-      .select("*")
-      .eq("user_id", user_id)
-      .order("serial_number", { ascending: false })
+      .from('travelplan')
+      .select('*')
+      .eq('user_id', user_id)
+      .order('serial_number', { ascending: false })
       .range(startPageNum, endPageNum);
 
     if (dataError) {
@@ -234,9 +258,9 @@ app.get("/mypost", async (req, res) => {
 
     // user_id에 해당하는 총 데이터 개수를 가져오는 쿼리 (실제 데이터를 가져오지 않음)
     const { count, error: countError } = await supabase
-      .from("travelplan")
-      .select("*", { count: "exact" }) // 총 개수만 계산
-      .eq("user_id", user_id);
+      .from('travelplan')
+      .select('*', { count: 'exact' }) // 총 개수만 계산
+      .eq('user_id', user_id);
     if (countError) {
       return res.status(500).send({ error: countError.message }); // 총 개수 쿼리 에러 처리
     }
@@ -248,7 +272,7 @@ app.get("/mypost", async (req, res) => {
     });
   } catch (error) {
     // 예상치 못한 오류를 처리
-    res.status(500).send({ error: "예기치 않은 오류가 발생했습니다." });
+    res.status(500).send({ error: '예기치 않은 오류가 발생했습니다.' });
   }
 });
 
@@ -270,7 +294,7 @@ app.get('/api/reviews', async (req, res) => {
       .order('serial_number', { ascending: false })
       .range(start, end);
 
-    const { mbti, search, withReview } = req.query;
+    const { mbti, search, sort } = req.query;
 
     // MBTI 필터
     if (mbti && mbti !== 'MBTI별 게시글') {
@@ -283,17 +307,21 @@ app.get('/api/reviews', async (req, res) => {
       query = query.or(`sub_title.ilike.%${search}%,content_text.ilike.%${search}%`);
     }
 
-    // 후기 필터링
-    if (withReview === 'true') {
-      query = query.not('review', 'is', null);
+    // 정렬 방식 적용
+    if (sort === 'comment') {
+      query = query.order('comment_count', { ascending: false }); // 댓글순
+    } else {
+      query = query.order('serial_number', { ascending: false }); // 최신순 (기본)
     }
 
     const { data, count, error } = await query;
+
     if (error) throw error;
 
+    console.log('📊 서버 응답 데이터:', data); // 로그로 데이터 확인
     res.json({ success: true, data, totalCount: count ?? 0 });
   } catch (err) {
-    console.error('후기 게시글 조회 에러:', err);
+    console.error('❌ 후기 게시글 조회 에러:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
